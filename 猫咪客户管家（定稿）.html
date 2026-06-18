@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>猫咪客户管家 - 自动备份版（IndexedDB）</title>
+    <link href="https://cdn.staticfile.net/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        *{box-sizing:border-box}body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f8fafc;color:#334155}
+        .theme-ragdoll{background:linear-gradient(135deg,#e0e7ff,#f3e8ff);border-radius:1.5rem;border:2px solid #c7d2fe}
+        .theme-ragdoll h2{color:#4338ca}
+        .theme-ragdoll .input-field{background:rgba(255,255,255,.8);border:1px solid #a5b4fc;transition:.3s}
+        .theme-ragdoll .input-field:focus{background:#fff;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.2)}
+        .theme-maine{background:linear-gradient(135deg,#fff7ed,#fef3c7);border-radius:.5rem;border:3px solid #d97706}
+        .theme-maine h2{color:#92400e}
+        .theme-maine table th{background:#b45309;color:#fff}
+        .theme-orange{background:linear-gradient(135deg,#ffedd5,#fed7aa);border-radius:2rem;border:2px dashed #fb923c}
+        .task-card{background:#fff;border-left:5px solid #f97316;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);transition:transform .2s;cursor:pointer}
+        .task-card:hover{transform:translateY(-2px)}
+        .task-card.completed{opacity:.6;border-left-color:#22c55e;text-decoration:line-through}
+        .theme-stats{background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border-radius:1rem;border:2px solid #94a3b8}
+        .stat-card{background:#fff;border-radius:.75rem;padding:1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.1);border-left:4px solid #3b82f6}
+        .stat-number{font-size:2rem;font-weight:700;color:#1e293b}
+        .stat-label{font-size:.875rem;color:#64748b}
+        #toast-container{position:fixed;top:20px;right:20px;z-index:50}
+        .toast{background:#fff;padding:1rem 1.5rem;border-radius:.5rem;box-shadow:0 10px 15px -3px rgba(0,0,0,.1);margin-bottom:.5rem;display:flex;align-items:center;gap:.75rem;animation:slideIn .3s ease-out;border-left:4px solid}
+        .toast.success{border-color:#22c55e}
+        .toast.error{border-color:#ef4444}
+        @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+        .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:flex;justify-content:center;align-items:center;z-index:40;opacity:0;pointer-events:none;transition:opacity .3s}
+        .modal-overlay.active{opacity:1;pointer-events:auto}
+        .modal-content{background:#fff;padding:2rem;border-radius:1rem;max-width:450px;width:90%;transform:scale(.9);transition:transform .3s}
+        .modal-overlay.active .modal-content{transform:scale(1)}
+        .inline-edit-input{width:100%;padding:.25rem .5rem;border-radius:.375rem;border:1px solid #d1d5db;background:#fff;font-size:.875rem}
+        .editable-cell{cursor:pointer}.editable-cell:hover{background:#fef3c7}
+        .save-cell-icon{margin-left:.25rem;font-size:.7rem;color:#d97706;opacity:.6;cursor:pointer}
+        .category-select{padding:.25rem .5rem;border-radius:.375rem;border:1px solid #d1d5db;background:#fff;font-size:.75rem;font-weight:700;cursor:pointer}
+        .search-input{padding:.5rem 1rem;border-radius:.5rem;border:1px solid #e2e8f0;width:250px;font-size:.875rem}
+        .pagination-btn{padding:.25rem .75rem;border-radius:.375rem;background:#f1f5f9;border:1px solid #e2e8f0;cursor:pointer}
+        .pagination-btn.active{background:#b45309;color:#fff}
+        .loading-spinner{display:inline-block;width:20px;height:20px;border:2px solid #f3f3f3;border-top:2px solid #f59e0b;border-radius:50%;animation:spin 1s linear infinite}
+        @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+        #contact-list-text{width:100%;padding:.75rem;border:1px solid #e2e8f0;border-radius:.5rem;font-family:monospace;font-size:.875rem;background:#f8fafc;resize:vertical;white-space:pre-wrap}
+        input[type="date"]{padding:.5rem;border-radius:.5rem;border:1px solid #cbd5e1;background:#fff}
+        .date-hint{font-size:.7rem;color:#9ca3af;margin-top:.25rem}
+        .backup-select{padding:.25rem .5rem;border-radius:.375rem;border:1px solid #d1d5db;background:#fff;font-size:.75rem;margin-left:0.5rem}
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+<header class="bg-white shadow-md z-10">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600"><i class="fa-solid fa-cat text-xl"></i></div><div><h1 class="text-xl font-bold text-gray-800">猫咪客户管家</h1><p class="text-xs text-gray-500">自动备份 · 保留5个版本</p></div></div>
+        <div class="flex items-center gap-2 flex-wrap">
+            <div class="text-sm text-gray-400" id="current-time-display"></div>
+            <button onclick="exportToCSV()" class="px-3 py-1.5 text-xs bg-green-50 text-green-600 rounded-lg hover:bg-green-100 border">📎 导出Excel</button>
+            <label for="import-csv-file" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border cursor-pointer">📂 导入Excel</label>
+            <input type="file" id="import-csv-file" accept=".csv" class="hidden">
+            <button onclick="exportJSON()" class="px-3 py-1.5 text-xs bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 border">💾 JSON备份</button>
+            <label for="import-json-file" class="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 border cursor-pointer">📂 恢复备份</label>
+            <input type="file" id="import-json-file" accept=".json" class="hidden">
+            <select id="history-backup-select" class="backup-select" onchange="restoreFromHistory(this.value)"><option value="">📜 历史版本</option></select>
+            <span id="db-status" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">✅ 就绪</span>
+        </div>
+    </div>
+</header>
+<nav class="bg-white border-b sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 flex gap-8 overflow-x-auto">
+        <button onclick="switchTab('entry')" id="tab-entry" class="py-4 px-2 border-b-2 border-indigo-600 text-indigo-600 font-medium whitespace-nowrap"><i class="fa-solid fa-pen"></i> 信息录入</button>
+        <button onclick="switchTab('list')" id="tab-list" class="py-4 px-2 border-b-2 border-transparent text-gray-500 hover:text-amber-600 font-medium whitespace-nowrap"><i class="fa-solid fa-list"></i> 客户列表</button>
+        <button onclick="switchTab('habits')" id="tab-habits" class="py-4 px-2 border-b-2 border-transparent text-gray-500 hover:text-orange-600 font-medium whitespace-nowrap"><i class="fa-solid fa-mug-hot"></i> 每日习惯</button>
+        <button onclick="switchTab('stats')" id="tab-stats" class="py-4 px-2 border-b-2 border-transparent text-gray-500 hover:text-slate-600 font-medium whitespace-nowrap"><i class="fa-solid fa-chart-bar"></i> 数据统计</button>
+    </div>
+</nav>
+<main class="flex-grow max-w-7xl mx-auto px-4 py-8 w-full relative">
+    <!-- 信息录入 -->
+    <section id="view-entry" class="view-section">
+        <div class="theme-ragdoll p-8 shadow-lg max-w-4xl mx-auto">
+            <div class="flex items-center gap-3 mb-6"><i class="fa-solid fa-cat text-2xl text-indigo-600"></i><h2 class="text-2xl font-bold">客户信息录入</h2></div>
+            <form id="entry-form" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">客户姓名 <span class="text-red-500">*</span></label><input type="text" id="input-name" class="input-field w-full px-4 py-2 rounded-lg" required></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">联系方式</label><input type="text" id="input-contact" class="input-field w-full px-4 py-2 rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">开始日期</label><input type="date" id="input-start" class="w-full px-4 py-2 rounded-lg border border-gray-300"><p class="date-hint">点击选择或手动输入</p></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">合同开始日期</label><input type="date" id="input-contract-start" class="w-full px-4 py-2 rounded-lg border border-gray-300"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">合同结束日期</label><input type="date" id="input-contract-end" class="w-full px-4 py-2 rounded-lg border border-gray-300"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">丢客日期</label><input type="date" id="input-lost" class="w-full px-4 py-2 rounded-lg border border-gray-300"></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">需求备注</label><textarea id="input-req" class="input-field w-full px-4 py-2 rounded-lg" rows="3"></textarea></div>
+                <div class="md:col-span-2 flex justify-end"><button type="submit" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"><i class="fa-solid fa-save mr-2"></i>保存客户</button></div>
+            </form>
+        </div>
+    </section>
+    <!-- 客户列表 -->
+    <section id="view-list" class="view-section hidden">
+        <div class="theme-maine p-8 shadow-lg">
+            <div class="flex items-center justify-between flex-wrap gap-4 mb-6"><div class="flex items-center gap-3"><i class="fa-solid fa-list text-2xl text-amber-700"></i><h2 class="text-2xl font-bold">客户列表</h2></div><div class="flex gap-2"><input type="text" id="search-input" placeholder="🔍 搜索..." class="search-input"><button onclick="clearSearch()" class="px-3 py-2 text-xs bg-gray-200 rounded-lg">清空</button></div></div>
+            <div id="list-loading" class="text-center py-12"><div class="loading-spinner"></div><p>加载中...</p></div>
+            <div id="list-empty-state" class="text-center py-12 text-gray-500 hidden"><i class="fa-solid fa-inbox text-4xl mb-4"></i><p>暂无客户数据</p></div>
+            <div class="overflow-x-auto hidden" id="table-container"><table class="w-full text-sm"><thead><tr><th class="p-3 text-center">序号</th><th>姓名</th><th>联系方式</th><th>开始日期</th><th>合同结束</th><th>丢客日期</th><th>需求备注</th><th>分类</th><th>操作</th></tr></thead><tbody id="customer-table-body"></tbody></table></div>
+            <div id="pagination-container" class="flex justify-center gap-2 mt-6"></div><div id="total-count" class="text-center text-xs text-gray-400 mt-3"></div>
+        </div>
+    </section>
+    <!-- 每日习惯 -->
+    <section id="view-habits" class="view-section hidden">
+        <div class="theme-orange p-8 shadow-lg max-w-4xl mx-auto">
+            <div class="flex items-center gap-3 mb-6"><i class="fa-solid fa-mug-hot text-2xl text-orange-700"></i><h2 class="text-2xl font-bold">每日习惯任务</h2></div>
+            <div id="habits-loading" class="text-center py-12 hidden"><div class="loading-spinner"></div><p>加载中...</p></div>
+            <div id="habits-empty-state" class="text-center py-12 text-gray-500 hidden"><i class="fa-solid fa-clipboard-list text-4xl mb-4"></i><p>暂无任务</p></div>
+            <div id="habits-completion-state" class="text-center py-12 hidden"><i class="fa-solid fa-trophy text-5xl text-yellow-500 mb-4"></i><h3 class="text-xl font-bold">太棒了！</h3><p>今日所有任务已完成</p></div>
+            <div id="tasks-container" class="space-y-3"></div>
+            <div id="contact-list-panel" class="mt-6 hidden"><div class="bg-white rounded-lg p-4 shadow border border-orange-200"><div class="flex justify-between items-center mb-3"><h3 class="font-bold text-orange-700"><i class="fa-solid fa-robot mr-2"></i>🤖 AI协作清单</h3><button id="copy-contact-list-btn" class="px-3 py-1 text-xs bg-orange-100 text-orange-600 rounded-lg">📋 一键复制</button></div><textarea id="contact-list-text" rows="6" class="w-full border rounded-lg bg-gray-50" readonly placeholder="点击下方按钮生成..."></textarea><p class="text-xs text-gray-400 mt-2">💡 复制后发送给AI，AI会帮您提炼房源关键词</p></div></div>
+            <button id="generate-contact-list" class="mt-4 w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">📋 生成待联系清单（发送给AI）</button>
+        </div>
+    </section>
+    <!-- 数据统计 -->
+    <section id="view-stats" class="view-section hidden">
+        <div class="theme-stats p-8 shadow-lg">
+            <div class="flex justify-between items-center mb-6 flex-wrap gap-2"><div class="flex items-center gap-3"><i class="fa-solid fa-chart-bar text-2xl"></i><h2 class="text-2xl font-bold">数据统计</h2></div><div class="flex gap-2"><button onclick="setStatsPeriod('week')" id="btn-week" class="px-4 py-2 rounded-lg bg-slate-600 text-white text-sm">本周</button><button onclick="setStatsPeriod('month')" id="btn-month" class="px-4 py-2 rounded-lg bg-white text-slate-600 text-sm shadow border">本月</button></div></div>
+            <div id="stats-empty" class="text-center py-12 text-gray-500 hidden"><i class="fa-solid fa-chart-pie text-4xl mb-4"></i><p>暂无数据</p></div>
+            <div id="stats-content" class="hidden"><div id="stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div><table class="w-full text-sm bg-white rounded-lg overflow-hidden shadow"><thead><tr class="bg-slate-100"><th class="p-3 text-left">指标</th><th class="p-3 text-left">数量</th><th class="p-3 text-left">详情</th></tr></thead><tbody id="stats-body"></tbody></table></div>
+        </div>
+    </section>
+</main>
+<div id="toast-container"></div>
+<div id="modal-overlay" class="modal-overlay"><div class="modal-content"><h3 id="modal-title" class="text-lg font-bold mb-2">提示</h3><p id="modal-content" class="text-gray-600 mb-2"></p><div id="modal-extra" class="hidden"><div class="flex justify-center gap-3 my-3"><button id="modal-overwrite" class="px-4 py-2 rounded bg-red-600 text-white">覆盖导入</button><button id="modal-append" class="px-4 py-2 rounded bg-blue-600 text-white">追加导入</button></div></div><div class="flex justify-end gap-3 mt-3" id="modal-default"><button onclick="closeModal(false)" class="px-4 py-2 rounded border">取消</button><button onclick="closeModal(true)" class="px-4 py-2 rounded bg-indigo-600 text-white">确认</button></div></div></div>
+
+<script>
+// ==================== IndexedDB 核心 ====================
+const DB_NAME='CatDB', STORE='customers', BACKUP_STORE='backups', VERSION=2;
+let db=null, backupLock=false; // 防止恢复时触发备份循环
+const openDB=()=>new Promise((res,rej)=>{
+    if(db && db.name===DB_NAME) return res(db);
+    const req=indexedDB.open(DB_NAME,VERSION);
+    req.onerror=()=>rej(req.error);
+    req.onsuccess=()=>{ db=req.result; res(db); };
+    req.onupgradeneeded=e=>{
+        let dbInst=e.target.result;
+        if(!dbInst.objectStoreNames.contains(STORE)) dbInst.createObjectStore(STORE,{keyPath:'id'});
+        if(!dbInst.objectStoreNames.contains(BACKUP_STORE)) dbInst.createObjectStore(BACKUP_STORE,{keyPath:'timestamp'});
+    };
+});
+const getAll=async()=>{ await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readonly'), store=tx.objectStore(STORE), items=[]; store.openCursor().onsuccess=e=>{ let c=e.target.result; if(c){ items.push(c.value); c.continue(); } else res(items); }; tx.onerror=()=>rej(tx.error); }); };
+const put=async c=>{ await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).put(c); tx.oncomplete=()=>res(c); tx.onerror=()=>rej(tx.error); }); };
+const del=async id=>{ await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); };
+const clearAll=async()=>{ await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).clear(); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); };
+const bulkPut=async arr=>{ for(let c of arr) await put(c); };
+
+// ==================== 自动备份模块（保留最近5个版本）====================
+async function addBackup(customersData){
+    if(backupLock) return; // 恢复时不触发备份
+    await openDB();
+    const now=Date.now();
+    const backup={ timestamp:now, data:customersData };
+    const tx=db.transaction(BACKUP_STORE,'readwrite');
+    const store=tx.objectStore(BACKUP_STORE);
+    await new Promise((res,rej)=>{ const req=store.put(backup); req.onsuccess=res; req.onerror=rej; });
+    // 获取所有备份按时间倒序，保留最近5个
+    const allBackups=await new Promise((res,rej)=>{
+        const tx2=db.transaction(BACKUP_STORE,'readonly');
+        const store2=tx2.objectStore(BACKUP_STORE);
+        const items=[];
+        store2.openCursor(null,'prev').onsuccess=e=>{ let c=e.target.result; if(c){ items.push(c.value); c.continue(); } else res(items); };
+        tx2.onerror=()=>rej(tx2.error);
+    });
+    const toDelete=allBackups.slice(5); // 第6个及以后的要删除
+    if(toDelete.length){
+        const txDel=db.transaction(BACKUP_STORE,'readwrite');
+        const storeDel=txDel.objectStore(BACKUP_STORE);
+        for(let b of toDelete) storeDel.delete(b.timestamp);
+        await new Promise((res,rej)=>{ txDel.oncomplete=res; txDel.onerror=rej; });
+        showToast(`已自动清理旧备份，当前保留最近5个版本`,'info');
+    }
+}
+async function getBackupList(){
+    await openDB();
+    return new Promise((res,rej)=>{
+        const tx=db.transaction(BACKUP_STORE,'readonly');
+        const store=tx.objectStore(BACKUP_STORE);
+        const items=[];
+        store.openCursor(null,'prev').onsuccess=e=>{ let c=e.target.result; if(c){ items.push({ timestamp:c.value.timestamp, date:new Date(c.value.timestamp).toLocaleString() }); c.continue(); } else res(items); };
+        tx.onerror=()=>rej(tx.error);
+    });
+}
+async function restoreBackup(timestamp){
+    await openDB();
+    const backup=await new Promise((res,rej)=>{
+        const tx=db.transaction(BACKUP_STORE,'readonly');
+        const store=tx.objectStore(BACKUP_STORE);
+        const req=store.get(timestamp);
+        req.onsuccess=()=>res(req.result);
+        req.onerror=()=>rej(req.error);
+    });
+    if(backup && backup.data){
+        backupLock=true;
+        await clearAll();
+        for(let c of backup.data) await put(c);
+        backupLock=false;
+        await refreshAllDataAndUI();
+        showToast(`已恢复到 ${new Date(timestamp).toLocaleString()} 的版本`,'success');
+    }else{
+        showToast('备份不存在','error');
+    }
+}
+async function refreshBackupSelect(){
+    const list=await getBackupList();
+    const select=document.getElementById('history-backup-select');
+    select.innerHTML='<option value="">📜 历史版本</option>';
+    list.forEach(b=>{
+        const opt=document.createElement('option');
+        opt.value=b.timestamp;
+        opt.textContent=b.date;
+        select.appendChild(opt);
+    });
+}
+// 刷新所有数据并更新UI（供恢复后调用）
+async function refreshAllDataAndUI(){
+    customers=await getAll();
+    for(let c of customers) updateCat(c);
+    await bulkPut(customers);
+    customers=await getAll();
+    if(habitsLoaded || statsLoaded) await genTasks();
+    await refreshUI();
+}
+// 在每次数据变更后调用此函数（保存、删除、导入等）
+async function afterDataChange(){
+    const all=await getAll();
+    await addBackup(all);
+    await refreshBackupSelect();
+    await refreshUI();
+}
+// 用于手动触发备份（例如初始化时）
+async function initialBackup(){
+    const all=await getAll();
+    await addBackup(all);
+    await refreshBackupSelect();
+}
+
+// ==================== 全局状态 ====================
+let customers=[], tasks=[], curDate=new Date(), curTab='entry', statsPeriod='week', search='', curPage=1, pageSize=20;
+let habitsLoaded=false, statsLoaded=false;
+
+// 工具函数
+const parseDate=s=>s?new Date(s):null;
+const getDaysDiff=d=>d?Math.floor((d-curDate)/864e5):null;
+const calcCat=c=>{
+    let s=parseDate(c.start), e=parseDate(c.contractEnd), l=parseDate(c.lost), diff;
+    if(e && (diff=getDaysDiff(e))!==null && diff<=40) return 'A';
+    if(l && (diff=getDaysDiff(l))!==null && diff<=40) return 'B';
+    if(s && (diff=getDaysDiff(s))!==null){
+        if(diff<20) return 'A';
+        if(diff<=30) return 'B+';
+        if(diff<=40) return 'B';
+        return 'C';
+    }
+    return 'C';
+};
+const updateCat=c=>{ let n=calcCat(c); if(c.category!==n){ c.category=n; put(c); } };
+const catColor=t=>({A:'bg-red-100 text-red-800','B+':'bg-orange-100 text-orange-800',B:'bg-yellow-100 text-yellow-800',C:'bg-green-100 text-green-800'}[t]||'bg-gray-100');
+const showToast=(msg,type='info')=>{ let d=document.getElementById('toast-container'), t=document.createElement('div'); t.className='toast '+type; t.innerHTML=`<i class="fa-solid ${type==='success'?'fa-check-circle':type==='error'?'fa-circle-exclamation':'fa-circle-info'}"></i><span>${msg}</span>`; d.appendChild(t); setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(),300); },3000); };
+let modalCb=null;
+const showModal=(title,content,onConfirm,onChoice=null)=>{ let d=document.getElementById('modal-extra'), def=document.getElementById('modal-default'); document.getElementById('modal-title').innerText=title; document.getElementById('modal-content').innerText=content; if(onChoice){ d.classList.remove('hidden'); def.classList.add('hidden'); let ow=document.getElementById('modal-overwrite'), ap=document.getElementById('modal-append'), no=ow.cloneNode(true), na=ap.cloneNode(true); ow.parentNode.replaceChild(no,ow); ap.parentNode.replaceChild(na,ap); no.onclick=()=>{ closeModal(); onChoice('overwrite'); }; na.onclick=()=>{ closeModal(); onChoice('append'); }; }else{ d.classList.add('hidden'); def.classList.remove('hidden'); modalCb=onConfirm; } document.getElementById('modal-overlay').classList.add('active'); };
+const closeModal=()=>{ document.getElementById('modal-overlay').classList.remove('active'); if(modalCb) modalCb(); modalCb=null; };
+const refreshUI=async()=>{ if(curTab==='list') await renderList(); if(curTab==='habits'){ if(!habitsLoaded){ await genTasks(); habitsLoaded=true; } renderHabits(); } if(curTab==='stats'){ if(!statsLoaded){ await genTasks(); statsLoaded=true; } renderStats(); } };
+
+// ==================== 客户列表 ====================
+const filtered=()=>search? customers.filter(c=>c.name.includes(search)||(c.contact&&c.contact.includes(search))||(c.req&&c.req.includes(search))) : [...customers];
+const renderList=async()=>{
+    let tbody=document.getElementById('customer-table-body'), loading=document.getElementById('list-loading'), empty=document.getElementById('list-empty-state'), container=document.getElementById('table-container'), pag=document.getElementById('pagination-container'), totalSpan=document.getElementById('total-count');
+    loading.classList.remove('hidden'); empty.classList.add('hidden'); container.classList.add('hidden');
+    await new Promise(r=>setTimeout(r,10));
+    let all=filtered(), total=all.length, totalPages=Math.ceil(total/pageSize); if(curPage>totalPages) curPage=Math.max(1,totalPages);
+    let start=(curPage-1)*pageSize, pageItems=all.slice(start,start+pageSize);
+    loading.classList.add('hidden');
+    if(total===0){ empty.classList.remove('hidden'); container.classList.add('hidden'); pag.innerHTML=''; totalSpan.innerText=''; return; }
+    empty.classList.add('hidden'); container.classList.remove('hidden'); tbody.innerHTML='';
+    pageItems.forEach((c,idx)=>{
+        let tr=document.createElement('tr'); tr.className='border-b hover:bg-orange-50';
+        let tdIdx=document.createElement('td'); tdIdx.className='p-3 text-center'; tdIdx.innerText=start+idx+1; tr.appendChild(tdIdx);
+        const createEdit=(field,val)=>{ let td=document.createElement('td'); td.className='p-3 editable-cell'; let div=document.createElement('div'); div.className='flex items-center gap-1'; let span=document.createElement('span'); span.innerText=val||'—'; span.className='flex-1'; let inp=document.createElement('input'); inp.type='text'; inp.value=val||''; inp.className='inline-edit-input hidden'; let icon=document.createElement('i'); icon.className='fa-solid fa-pen save-cell-icon'; let save=()=>{ let nv=inp.value.trim(); if(nv!==(c[field]||'')){ c[field]=nv; if(field!=='req'&&field!=='contact') updateCat(c); put(c); afterDataChange(); showToast(`${field}已更新`,'success'); renderList(); if(habitsLoaded||curTab==='habits'){ genTasks(); renderHabits(); } if(statsLoaded||curTab==='stats') renderStats(); } span.innerText=nv||'—'; span.classList.remove('hidden'); inp.classList.add('hidden'); icon.classList.remove('hidden'); }; inp.addEventListener('blur',save); inp.addEventListener('keypress',e=>e.key==='Enter'&&inp.blur()); span.addEventListener('click',()=>{ span.classList.add('hidden'); inp.classList.remove('hidden'); icon.classList.add('hidden'); inp.focus(); }); icon.addEventListener('click',()=>{ span.classList.add('hidden'); inp.classList.remove('hidden'); icon.classList.add('hidden'); inp.focus(); }); div.appendChild(span); div.appendChild(inp); div.appendChild(icon); td.appendChild(div); return td; };
+        tr.appendChild(createEdit('name',c.name)); tr.appendChild(createEdit('contact',c.contact)); tr.appendChild(createEdit('start',c.start)); tr.appendChild(createEdit('contractEnd',c.contractEnd)); tr.appendChild(createEdit('lost',c.lost)); tr.appendChild(createEdit('req',c.req));
+        let tdCat=document.createElement('td'); tdCat.className='p-3'; let sel=document.createElement('select'); sel.className=`category-select ${catColor(c.category)}`; ['A','B+','B','C'].forEach(v=>{ let o=document.createElement('option'); o.value=v; o.innerText=v; if(c.category===v) o.selected=true; sel.appendChild(o); }); sel.onchange=async()=>{ c.category=sel.value; await put(c); afterDataChange(); showToast('分类已更新','success'); renderList(); if(habitsLoaded||curTab==='habits'){ genTasks(); renderHabits(); } if(statsLoaded||curTab==='stats') renderStats(); }; tdCat.appendChild(sel); tr.appendChild(tdCat);
+        let tdAct=document.createElement('td'); tdAct.className='p-3'; let delBtn=document.createElement('button'); delBtn.innerHTML='<i class="fa-solid fa-trash"></i>'; delBtn.className='text-red-500 hover:text-red-700'; delBtn.onclick=()=>showModal('确认删除','确定删除？',async()=>{ await del(c.id); customers=await getAll(); afterDataChange(); showToast('已删除','info'); await refreshUI(); }); tdAct.appendChild(delBtn); tr.appendChild(tdAct);
+        tbody.appendChild(tr);
+    });
+    pag.innerHTML='';
+    if(totalPages>1){
+        let prev=document.createElement('button'); prev.innerText='‹'; prev.className='pagination-btn'; if(curPage===1) prev.disabled=true; prev.onclick=()=>{ if(curPage>1){ curPage--; renderList(); } }; pag.appendChild(prev);
+        let startP=Math.max(1,curPage-2), endP=Math.min(totalPages,curPage+2);
+        for(let i=startP;i<=endP;i++){ let btn=document.createElement('button'); btn.innerText=i; btn.className=`pagination-btn ${curPage===i?'active':''}`; btn.onclick=()=>{ curPage=i; renderList(); }; pag.appendChild(btn); }
+        let next=document.createElement('button'); next.innerText='›'; next.className='pagination-btn'; if(curPage===totalPages) next.disabled=true; next.onclick=()=>{ if(curPage<totalPages){ curPage++; renderList(); } }; pag.appendChild(next);
+    }
+    totalSpan.innerText=`共 ${total} 条，第 ${curPage}/${totalPages||1} 页`;
+};
+const handleSearch=()=>{ search=document.getElementById('search-input').value.trim(); curPage=1; renderList(); };
+const clearSearch=()=>{ document.getElementById('search-input').value=''; search=''; curPage=1; renderList(); };
+
+// ==================== 每日习惯 ====================
+const genTasks=async()=>{
+    let all=await getAll(), newTasks=[];
+    all.forEach((c,idx)=>{ let cat=c.category, start=parseDate(c.start), count=0;
+        if(cat==='A'||cat==='B+') count=2; else if(cat==='B') count=1; else if(cat==='C'&&start){ let diff=getDaysDiff(start); if(diff!==null && Math.abs(diff)%3===0) count=1; }
+        for(let i=0;i<count;i++) newTasks.push({ id:`${c.id}-${i}`, customerId:c.id, customerName:c.name||'未命名', contact:c.contact||'无', category:cat, listIndex:idx+1, completed:false });
+    });
+    let todayKey=`habit_${curDate.toISOString().slice(0,10)}`, saved=localStorage.getItem(todayKey);
+    if(saved){ let map=JSON.parse(saved); newTasks.forEach(t=>{ if(map[t.id]) t.completed=true; }); }
+    tasks=newTasks;
+};
+const playConfetti=()=>{ let end=Date.now()+2000; (function f(){ confetti({particleCount:5,angle:60,spread:55,origin:{x:0},colors:['#f97316']}); confetti({particleCount:5,angle:120,spread:55,origin:{x:1},colors:['#f97316']}); if(Date.now()<end) requestAnimationFrame(f); })(); };
+const renderHabits=()=>{
+    let cont=document.getElementById('tasks-container'), empty=document.getElementById('habits-empty-state'), complete=document.getElementById('habits-completion-state');
+    cont.innerHTML='';
+    if(!customers.length || !tasks.length){ empty.classList.remove('hidden'); complete.classList.add('hidden'); return; }
+    empty.classList.add('hidden');
+    let allDone=tasks.length>0 && tasks.every(t=>t.completed);
+    if(allDone){
+        complete.classList.remove('hidden'); cont.classList.add('hidden');
+        let key=`confetti_${curDate.toISOString().slice(0,10)}`;
+        if(!localStorage.getItem(key)){ playConfetti(); localStorage.setItem(key,'1'); }
+        return;
+    }
+    complete.classList.add('hidden'); cont.classList.remove('hidden');
+    tasks.forEach(t=>{
+        let card=document.createElement('div'); card.className=`task-card p-4 rounded-lg flex items-center justify-between ${t.completed?'completed':''}`; card.onclick=()=>toggleTask(t.id);
+        card.innerHTML=`<div class="flex-1"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-bold px-2 py-0.5 rounded ${catColor(t.category)}">${t.category}</span><span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">#${t.listIndex}</span></div><h4 class="font-bold text-gray-800">${escapeHtml(t.customerName)}</h4><p class="text-xs text-gray-500"><i class="fa-solid fa-phone mr-1"></i>${escapeHtml(t.contact)}</p></div><div class="text-xl ml-3">${t.completed?'<i class="fa-solid fa-circle-check text-green-500"></i>':'<i class="fa-regular fa-circle text-gray-400"></i>'}</div>`;
+        cont.appendChild(card);
+    });
+};
+const escapeHtml=s=>s?s.replace(/[&<>]/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[m])):'';
+const toggleTask=async id=>{ let t=tasks.find(t=>t.id===id); if(t){ t.completed=!t.completed; let key=`habit_${curDate.toISOString().slice(0,10)}`, map={}; tasks.forEach(tt=>{ if(tt.completed) map[tt.id]=true; }); localStorage.setItem(key,JSON.stringify(map)); renderHabits(); } };
+const generateContactList=()=>{
+    if(!habitsLoaded){ genTasks(); habitsLoaded=true; }
+    let inc=tasks.filter(t=>!t.completed);
+    if(!inc.length){ showToast('今日所有任务已完成','info'); return; }
+    let uniq=[], ids=new Set();
+    for(let t of inc){ if(!ids.has(t.customerId)){ ids.add(t.customerId); let full=customers.find(c=>c.id===t.customerId); uniq.push({ name:t.customerName, category:t.category, req:full?.req||'无备注' }); } }
+    let text=`【待联系客户清单】共 ${uniq.length} 位\n生成时间：${new Date().toLocaleString()}\n${'━'.repeat(40)}\n\n`+uniq.map((c,i)=>`[${i+1}] 客户：${c.name}\n    分类：${c.category}\n    需求：${c.req}\n    ───────────────────────\n`).join('')+`${'━'.repeat(40)}\n请AI提炼房源关键词并推荐房源\n`;
+    let ta=document.getElementById('contact-list-text'), pan=document.getElementById('contact-list-panel'); ta.value=text; pan.classList.remove('hidden'); pan.scrollIntoView({behavior:'smooth'}); showToast(`已生成 ${uniq.length} 位客户清单`,'success');
+};
+const copyContactList=()=>{ let ta=document.getElementById('contact-list-text'); if(!ta.value || ta.value.includes('点击下方按钮')){ showToast('请先生成清单','info'); return; } ta.select(); document.execCommand('copy'); showToast('已复制','success'); };
+
+// ==================== 数据统计 ====================
+const renderStats=async()=>{
+    let cards=document.getElementById('stats-cards'), body=document.getElementById('stats-body'), empty=document.getElementById('stats-empty'), content=document.getElementById('stats-content');
+    if(!customers.length){ empty.classList.remove('hidden'); content.classList.add('hidden'); return; }
+    empty.classList.add('hidden'); content.classList.remove('hidden');
+    let now=curDate, start=new Date(now); start.setDate(start.getDate()-(statsPeriod==='week'?7:30));
+    let lost=0,deal=0,newC=0, lostL=[],dealL=[],newL=[];
+    customers.forEach(c=>{ let ld=parseDate(c.lost); if(ld&&ld>=start&&ld<=now){ lost++; lostL.push(c.name); } let cs=parseDate(c.contractStart); if(cs&&cs>=start&&cs<=now){ deal++; dealL.push(c.name); } let cr=new Date(c.createdAt); if(cr>=start&&cr<=now){ newC++; newL.push(c.name); } });
+    cards.innerHTML=`<div class="stat-card"><div class="stat-number text-red-500">${lost}</div><div class="stat-label">${statsPeriod==='week'?'本周':'本月'}丢客</div></div><div class="stat-card"><div class="stat-number text-green-500">${deal}</div><div class="stat-label">${statsPeriod==='week'?'本周':'本月'}成交</div></div><div class="stat-card"><div class="stat-number text-blue-500">${newC}</div><div class="stat-label">${statsPeriod==='week'?'本周':'本月'}新增</div></div><div class="stat-card"><div class="stat-number text-orange-500">${tasks.filter(t=>t.completed).length}/${tasks.length}</div><div class="stat-label">今日习惯</div></div>`;
+    body.innerHTML=`<tr class="border-b"><td class="p-3 font-medium">丢客情况</td><td class="p-3"><span class="px-2 py-1 rounded text-xs bg-red-100">${lost}</span></td><td class="p-3 text-gray-500">${lostL.join('、')||'无'}</td></tr><tr class="border-b"><td class="p-3 font-medium">成交情况</td><td class="p-3"><span class="px-2 py-1 rounded text-xs bg-green-100">${deal}</span></td><td class="p-3 text-gray-500">${dealL.join('、')||'无'}</td></tr><tr class="border-b"><td class="p-3 font-medium">新增客户</td><td class="p-3"><span class="px-2 py-1 rounded text-xs bg-blue-100">${newC}</span></td><td class="p-3 text-gray-500">${newL.join('、')||'无'}</td></tr>`;
+};
+const setStatsPeriod=p=>{ statsPeriod=p; document.getElementById('btn-week').className=p==='week'?'px-4 py-2 rounded-lg bg-slate-600 text-white text-sm':'px-4 py-2 rounded-lg bg-white text-slate-600 text-sm shadow border'; document.getElementById('btn-month').className=p==='month'?'px-4 py-2 rounded-lg bg-slate-600 text-white text-sm':'px-4 py-2 rounded-lg bg-white text-slate-600 text-sm shadow border'; renderStats(); };
+
+// ==================== 导入导出 ====================
+const exportToCSV=()=>{ if(!customers.length){ showToast('暂无数据','error'); return; } let headers=['序号','姓名','联系方式','开始日期','合同开始','合同结束','丢客日期','需求备注','分类']; let rows=[headers]; customers.forEach((c,i)=>{ rows.push([i+1,c.name,c.contact||'',c.start||'',c.contractStart||'',c.contractEnd||'',c.lost||'',c.req||'',c.category||'']); }); let csv=rows.map(row=>row.map(cell=>`"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n'); let blob=new Blob(['\uFEFF'+csv],{type:'text/csv'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`客户数据_${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(a.href); showToast('导出成功','success'); };
+const exportJSON=()=>{ if(!customers.length){ showToast('暂无数据','error'); return; } let data={version:'2.0',exportTime:new Date().toISOString(),customers}; let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`猫咪备份_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); showToast('备份导出成功','success'); };
+const parseCSVLine=l=>{ let res=[], inQ=false, cur=''; for(let ch of l){ if(ch==='"') inQ=!inQ; else if(ch===',' && !inQ){ res.push(cur); cur=''; } else cur+=ch; } res.push(cur); return res; };
+const setupImport=()=>{
+    document.getElementById('import-csv-file').onchange=e=>{ let f=e.target.files[0]; if(!f)return; let r=new FileReader(); r.onload=async ev=>{ let text=ev.target.result, lines=text.split('\n').filter(l=>l.trim()); if(lines.length<2){ showToast('CSV无数据','error'); return; } let newCust=[]; for(let i=1;i<lines.length;i++){ let vals=parseCSVLine(lines[i]); if(vals.length<2) continue; let name=vals[1]?.replace(/^"|"$/g,'').trim(); if(!name) continue; newCust.push({ id:Date.now()+i+Math.random(), name, contact:vals[2]?.replace(/^"|"$/g,'')||'', start:vals[3]?.replace(/^"|"$/g,'')||'', contractStart:vals[4]?.replace(/^"|"$/g,'')||'', contractEnd:vals[5]?.replace(/^"|"$/g,'')||'', lost:vals[6]?.replace(/^"|"$/g,'')||'', req:vals[7]?.replace(/^"|"$/g,'')||'', category:vals[8]?.replace(/^"|"$/g,'')||'', createdAt:new Date().toISOString() }); } if(!newCust.length){ showToast('无有效数据','error'); return; } showModal('选择导入模式',`检测到 ${newCust.length} 条数据`,null,async mode=>{ if(mode==='overwrite'){ await clearAll(); customers=newCust; }else{ customers.push(...newCust); } for(let c of customers) updateCat(c); await bulkPut(customers); customers=await getAll(); afterDataChange(); showToast(`导入成功，共 ${customers.length} 条`,'success'); }); }; r.readAsText(f,'UTF-8'); e.target.value=''; };
+    document.getElementById('import-json-file').onchange=e=>{ let f=e.target.files[0]; if(!f)return; let r=new FileReader(); r.onload=async ev=>{ try{ let data=JSON.parse(ev.target.result); if(!data.customers||!Array.isArray(data.customers)) throw new Error(); showModal('确认恢复',`将覆盖当前 ${customers.length} 条数据，共 ${data.customers.length} 条`,async()=>{ await clearAll(); customers=data.customers; for(let c of customers) updateCat(c); await bulkPut(customers); customers=await getAll(); afterDataChange(); showToast(`恢复成功，共 ${customers.length} 条`,'success'); }); }catch(err){ showToast('文件格式错误','error'); } }; r.readAsText(f); e.target.value=''; };
+};
+
+// ==================== 页面切换 ====================
+const switchTab=async tab=>{
+    curTab=tab;
+    document.querySelectorAll('nav button').forEach(btn=>{ btn.classList.remove('border-indigo-600','text-indigo-600','border-amber-600','text-amber-600','border-orange-600','text-orange-600','border-slate-600','text-slate-600'); btn.classList.add('border-transparent','text-gray-500'); });
+    let act=document.getElementById('tab-'+tab); if(tab==='entry') act.classList.add('border-indigo-600','text-indigo-600'); if(tab==='list') act.classList.add('border-amber-600','text-amber-600'); if(tab==='habits') act.classList.add('border-orange-600','text-orange-600'); if(tab==='stats') act.classList.add('border-slate-600','text-slate-600');
+    document.querySelectorAll('.view-section').forEach(s=>s.classList.add('hidden'));
+    document.getElementById('view-'+tab).classList.remove('hidden');
+    if(tab==='list') await renderList();
+    if(tab==='habits'){ if(!habitsLoaded){ await genTasks(); habitsLoaded=true; } renderHabits(); }
+    if(tab==='stats'){ if(!statsLoaded){ await genTasks(); statsLoaded=true; } renderStats(); }
+};
+const restoreFromHistory=async(timestamp)=>{
+    if(timestamp && timestamp!=='') await restoreBackup(parseInt(timestamp));
+    document.getElementById('history-backup-select').value='';
+};
+
+// ==================== 表单提交 ====================
+document.getElementById('entry-form').onsubmit=async e=>{
+    e.preventDefault();
+    let name=document.getElementById('input-name').value.trim();
+    if(!name){ showToast('请输入客户姓名','error'); return; }
+    let newC={ id:Date.now(), name, contact:document.getElementById('input-contact').value.trim(), start:document.getElementById('input-start').value, contractStart:document.getElementById('input-contract-start').value, contractEnd:document.getElementById('input-contract-end').value, lost:document.getElementById('input-lost').value, req:document.getElementById('input-req').value.trim(), category:'', createdAt:new Date().toISOString() };
+    newC.category=calcCat(newC);
+    await put(newC);
+    customers=await getAll();
+    document.getElementById('entry-form').reset();
+    showToast('客户已保存','success');
+    afterDataChange();
+    if(habitsLoaded || statsLoaded) await genTasks();
+    await refreshUI();
+};
+
+// ==================== 初始化 ====================
+(async()=>{
+    await openDB();
+    customers=await getAll();
+    // 迁移旧 localStorage 数据
+    let old=localStorage.getItem('cat_customer_data_v2');
+    if(old && !customers.length){
+        try{ let oldC=JSON.parse(old); if(oldC.length){ for(let c of oldC) if(c.id) await put(c); customers=await getAll(); showToast(`已从旧存储迁移 ${oldC.length} 条数据`,'success'); localStorage.removeItem('cat_customer_data_v2'); } }catch(e){}
+    }
+    for(let c of customers) updateCat(c);
+    await bulkPut(customers);
+    customers=await getAll();
+    await initialBackup(); // 首次创建备份
+    document.getElementById('search-input').oninput=handleSearch;
+    document.getElementById('generate-contact-list').onclick=generateContactList;
+    document.getElementById('copy-contact-list-btn').onclick=copyContactList;
+    setupImport();
+    setInterval(()=>{ document.getElementById('current-time-display').innerHTML=curDate.toISOString().slice(0,10).replace(/-/g,'-'); },1000);
+    await switchTab('entry');
+})();
+</script>
+</body>
+</html>
